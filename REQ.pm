@@ -54,7 +54,7 @@ use strict;
 
 package OpenCA::REQ;
 
-$OpenCA::REQ::VERSION = '0.7.31a';
+$OpenCA::REQ::VERSION = '0.7.35';
 
 my %params = (
 	req => undef,
@@ -126,7 +126,8 @@ sub new {
 		return if( not $self->{req});
         }
 
-        if( $self->{reqFormat} eq "" ) {
+        ## if( $self->{reqFormat} eq "" ) {
+	if( not (defined($self->{reqFormat})) or ($self->{reqFormat} eq "")) {
 		if( ( $self->{req} ) and ( $self->{req} =~ /SPKAC =/g ) ) {
 			$self->{reqFormat} = "SPKAC";
 		} elsif (($self->{req}) and ($self->{req} =~ /RENEW =/g)) {
@@ -291,7 +292,7 @@ sub getBody {
 	$ret =~ s/($beginHeader[\S\s\n]+$endHeader\n*)//;
 
 	## Let's throw away text between the two headers, included
-	$ret =~ s/($beginSig[\S\s\n]+$endSig)//;
+	$ret =~ s/([\n]$beginSig[\S\s\n]+$endSig)//;
 
 	$ret =~ s/\n$//;
 
@@ -393,14 +394,14 @@ sub parseReq {
 		return if ( not $textReq );
 
 		## Specific for NON SPKAC requests ...
-        	( $ret->{VERSION} ) = ( $textReq =~ /Version: ([a-e\d]+)/i );
+        	( $ret->{VERSION} ) = ( $textReq =~ /Version:\s+([a-f\d]+)/i );
         	( $ret->{DN} ) = ( $textReq =~ /Subject: (.*)\n/i );
 
                	( $ret->{EMAIL} ) = ($ret->{DN}=~ 
 					/Email=([^\,\/\n]+\@[^\,\/\n]+)/i);
 
                	( $ret->{CN}    ) = ( $ret->{DN} =~ /CN=([^\,\/\n]+)/i );
-               	( $ret->{L}     ) = ( $ret->{DN} =~ /L=([^\,\/\n]+)/i );
+               	( $ret->{L}     ) = ( $ret->{DN} =~ /^IL=([^\,\/\n]+)/i );
                	( $ret->{S}     ) = ( $ret->{DN} =~ /S=([^\,\/\n]+)/i );
                	( $ret->{O}     ) = ( $ret->{DN} =~ /O=([^\,\/\n]+)/i );
 
