@@ -49,21 +49,32 @@
 ## copied and put under another distribution licence
 ## [including the GNU Public Licence.]
 ##
+
+use strict;
+
 package OpenCA::REQ;
 
-$VERSION = '0.4.25';
+$OpenCA::REQ::VERSION = '0.7.10a';
 
 my %params = (
 	req => undef,
+	item => undef,
 	pemREQ => undef,
 	derREQ => undef,
+	txtREQ => undef,
 	spkacREQ => undef,
 	renewREQ => undef,
+	revokeREQ => undef,
 	parsedSPKAC => undef,
 	parsedRENEW => undef,
-	parsedREQ => undef,
+	parsedREVOKE => undef,
+	parsedItem => undef,
 	backend => undef,
-	reqFormat => "PEM",
+	beginHeader => undef,
+	endHeader => undef,
+	beginSignature => undef,
+	endSignature => undef,
+	reqFormat => undef,
 );
 
 sub new {
@@ -76,11 +87,17 @@ sub new {
 
         bless $self, $class;
 
+	$self->{beginHeader} 	= "-----BEGIN HEADER-----";
+	$self->{endHeader} 	= "-----END HEADER-----";
+	$self->{beginSignature} = "-----BEGIN PKCS7-----";
+	$self->{endSignature} 	= "-----END PKCS7-----";
+	$self->{reqFormat} 	= "PEM";
+
         my $keys = { @_ };
-        my $infile, $tmp;
+        my ( $infile, $keyfile, $tmp );
 
         $self->{req}       = $keys->{DATA};
-        $self->{reqFormat} = $keys->{FORMAT};
+        $self->{reqFormat} = ( $keys->{FORMAT} or $keys->{INFORM} );
 
         $self->{backend}    = $keys->{SHELL};
         $infile     = $keys->{INFILE};
@@ -109,17 +126,21 @@ sub new {
 		return if( not $self->{req});
         }
 
-        if( "$self->{reqFormat}" eq "" ) {
+        if( $self->{reqFormat} eq "" ) {
 		if( ( $self->{req} ) and ( $self->{req} =~ /SPKAC =/g ) ) {
 			$self->{reqFormat} = "SPKAC";
 		} elsif (($self->{req}) and ($self->{req} =~ /RENEW =/g)) {
                 	$self->{reqFormat} = "RENEW";
+		} elsif (($self->{req}) and ($self->{req} =~ /REVOKE =/g)) {
+                	$self->{reqFormat} = "REVOKE";
 		} else {
                 	$self->{reqFormat} = "PEM";
 		}
         }
 
         if ( $self->{req} ne "" ) {
+		$self->{item} = $self->{req};
+
                 if ( not $self->initReq( REQ=>$self->{req},
                                           FORMAT=>$self->{reqFormat})) {
                         return;
@@ -134,47 +155,60 @@ sub initReq {
         my $self = shift;
         my $keys = { @_ };
 
-        $self->{req} = $keys->{REQ};
-        $self->{reqFormat} =>$keys->{FORMAT};
+        $self->{reqFormat} 	= $keys->{FORMAT};
+	$self->{req}		= $self->getBody( REQUEST=> $keys->{REQ});
 
         return if (not $self->{req});
 
-	if( $self->{reqFormat} !~ /SPKAC|RENEW/i ) {
-        	$self->{pemREQ} = $self->{backend}->dataConvert( DATA=>$self->{req},
-                                        DATATYPE=>REQUEST,
+	if( $self->{reqFormat} !~ /SPKAC|RENEW|REVOKE/i ) {
+        	$self->{pemREQ} = $self->{backend}->dataConvert( 
+					DATA=>$self->{req},
+                                        DATATYPE=>"REQUEST",
                                         INFORM=>$self->{reqFormat},
-                                        OUTFORM=>PEM );
-        	$self->{derREQ} = $self->{backend}->dataConvert( DATA=>$self->{req},
-                                        DATATYPE=>REQUEST,
-                                        INFORM=>$self->{reqFormat},
-                                        OUTFORM=>DER );
-        	$txtREQ = $self->{backend}->dataConvert( DATA=>$self->{req},
-                                        DATATYPE=>REQUEST,
-                                        INFORM=>$self->{reqFormat},
-                                        OUTFORM=>TXT );
+                                        OUTFORM=>"PEM" );
 
-        	$self->{parsedREQ} = $self->parseReq( REQ=>$self->{pemREQ},
-						      FORMAT=>PEM );
+        	$self->{derREQ} = $self->{backend}->dataConvert( 
+					DATA=>$self->{req},
+                                        DATATYPE=>"REQUEST",
+                                        INFORM=>$self->{reqFormat},
+                                        OUTFORM=>"DER" );
+
+        	$self->{txtREQ} = $self->{backend}->dataConvert(
+					DATA=>$self->{req},
+                                        DATATYPE=>"REQUEST",
+                                        INFORM=>$self->{reqFormat},
+                                        OUTFORM=>"TXT" );
+
+       		$self->{parsedItem} = $self->parseReq( REQ=>$keys->{REQ},
+						FORMAT=>$self->{reqFormat} );
 
 		return if( (not $self->{pemREQ}) or (not $self->{derREQ} )
-			or (not $txtREQ) or (not $self->{parsedREQ}) );
+			or (not $self->{txtREQ}) or (not $self->{parsedItem}) );
 	} else {
 
 		if ( $self->{reqFormat} =~ /SPKAC/ ) {
 			$self->{spkacREQ} = $self->{req};
-        		$self->{parsedSPKAC}=$self->parseReq( REQ=>$self->{req},
-							FORMAT=>SPKAC );
-			$self->{parsedREQ} = $self->{parsedSPKAC};
+        		$self->{parsedSPKAC}=$self->parseReq( REQ=>$keys->{REQ},
+							FORMAT=>"SPKAC" );
+			$self->{parsedItem} = $self->{parsedSPKAC};
 
 			return if( not $self->{parsedSPKAC} );
 
 		} elsif ( $self->{reqFormat} =~ /RENEW/ ) {
 			$self->{renewREQ} = $self->{req};
-        		$self->{parsedRENEW}=$self->parseReq( REQ=>$self->{req},
-							FORMAT=>RENEW );
-			$self->{parsedREQ} = $self->{parsedRENEW};
+        		$self->{parsedRENEW}=$self->parseReq( REQ=>$keys->{REQ},
+							FORMAT=>"RENEW" );
+			$self->{parsedItem} = $self->{parsedRENEW};
 
 			return if( not $self->{parsedRENEW} );
+		} elsif ( $self->{reqFormat} =~ /REVOKE/ ) {
+			$self->{revokeREQ} = $self->{req};
+        		$self->{parsedREVOKE}=
+				$self->parseReq( REQ=>$keys->{REQ},
+					FORMAT=>"REVOKE" );
+			$self->{parsedItem} = $self->{parsedREVOKE};
+
+			return if( not $self->{parsedREVOKE} );
 		} else {
 			return;
 		}
@@ -192,10 +226,74 @@ sub getParsed {
 	} elsif( $self->{reqFormat} =~ /RENEW/i ) {
 		return if( not $self->{parsedRENEW} );
 		return $self->{parsedRENEW};
+	} elsif( $self->{reqFormat} =~ /REVOKE/i ) {
+		return if( not $self->{parsedREVOKE} );
+		return $self->{parsedREVOKE};
 	} else {
-        	return if ( not $self->{parsedREQ} );
-        	return $self->{parsedREQ};
+        	return if ( not $self->{parsedItem} );
+        	return $self->{parsedItem};
 	}
+}
+
+sub getHeader {
+	my $self = shift;
+	my $keys = { @_ };
+	my $req = $keys->{REQUEST};
+
+	my ( $txt, $ret, $i, $key, $val );
+
+	my $beginHeader = $self->{beginHeader};
+	my $endHeader = $self->{endHeader};
+
+	if( ($txt) = ( $req =~ /$beginHeader\n([\s\S\n]+)\n$endHeader/) ) {
+		foreach $i ( split ( /\n/, $txt ) ) {
+			$i =~ s/\s*=\s*/=/;
+			( $key, $val ) = ( $i =~ /(.*)\s*=\s*(.*)\s*/ );
+			$ret->{$key} = $val;
+		}
+	}
+
+	return $ret;
+}
+
+sub getSignature {
+	my $self = shift;
+	my $keys = { @_ };
+	my $req = $keys->{REQUEST};
+
+	my $ret;
+	my $beginSig 	= $self->{beginSignature};
+	my $endSig 	= $self->{endSignature};
+
+	## Let's get text between the two headers, included
+	if( ($ret) = ( $req =~ /($beginSig[\S\s\n]+$endSig)/m) ) {
+		return $ret
+	} else {
+		return;
+	}
+
+	return $ret;
+}
+
+sub getBody {
+	my $self = shift;
+	my $keys = { @_ };
+
+	my $ret = $keys->{REQUEST};
+
+	my $beginHeader 	= $self->{beginHeader};
+	my $endHeader 		= $self->{endHeader};
+
+	my $beginSig 		= $self->{beginSignature};
+	my $endSig 		= $self->{endSignature};
+
+	## Let's throw away text between the two headers, included
+	$ret =~ s/($beginHeader[\S\s\n]+$endHeader\n)//;
+
+	## Let's throw away text between the two headers, included
+	$ret =~ s/($beginSig[\S\s\n]+$endSig)//;
+
+	return $ret
 }
 
 sub parseReq {
@@ -204,186 +302,138 @@ sub parseReq {
 
         my $fullReq = $keys->{REQ};
 	my $format  = $keys->{FORMAT};
+
         my @dnList = ();
+	my @ou = ();
+	my @exts = ();
 
-	my $beginSig = "-----BEGIN PKCS7-----";
-	my $endSig   = "-----END PKCS7-----";
+        ## my ( $dn, $email, $cn, $s, $l, $o, $c, $spkac );
+        ## my ( $pkalg, $modulus, $exponent, $version );
+	## my ( $serial, $certSer, $passwd, $approved, $operator );
+	## my ( $notBefore, $dataType, $reqType, $sigAlg );
+        ## my ( $tmp, $tmpOU, $signature, $ra, $body, $textReq );
 
-        my $dn, $email, $cn, @ou, $s, $l, $o, $c, $spkac;
-        my $pkalg, $modulus, $exponent, $version, $serial, $certSer, $passwd;
-	my $notBefore, $dataType, $reqType, $sigAlg, @exts;
-        my $tmp, $tmpOU, $signature;
-
-	my $body = "";
+	my ( $ret, $tmp, $key, $val, $tmpOU, $ra, $textReq );
 
         return if (not $fullReq);
+
 	my ( @lines ) = split ( /\n/, $fullReq );
 
-	my $isSignature = 0;
-	my $isSigned = 0;
-	my $isBody = 1;
+	$ret->{SIGNATURE} 	= $self->getSignature( REQUEST=>$fullReq );
+	$ret->{HEADER} 		= $self->getHeader( REQUEST=>$fullReq );
+	$ret->{BODY}		= $self->getBody( REQUEST=> $fullReq);
+	$ret->{ITEM}		= $self->{item};
 
-	foreach $line (@lines) {
-		if ( $line =~ /$beginSig/ ) {
-			$isSignature = 1;
-			$isSigned = 1;
-			$isBody = 0;
-		}
-		if( $line =~ /$endSig/ ) {
-			$isSignature = 0;
-			$signature .= "$line\n";
-		}
+	$textReq = $ret->{BODY};
 
-		if( $isBody == 1 ) {
-			$body .= "$line\n";
-		}
-
-		if( $isSignature == 1 ) {
-			$signature .= "$line\n";
-		}
-	}
-
-	my $textReq = $body;
-
-	if( $format =~ /SPKAC|RENEW/i ) {
+	if( $format =~ /SPKAC|RENEW|REVOKE/i ) {
 		## Specific for SPKAC requests...
-		my @lines;
+		my ( @reqLines );
 
-		( $reqtype  ) = ( $textReq =~ /TYPE = (.*?)\n/i );
-		( $serial   ) = ( $textReq =~ /SERIAL = (.*?)\n/i );
+		@reqLines = split( /\n/ , $textReq );
+		for $tmp (@reqLines) {
+			$tmp =~ s/\s*=\s*/=/;
+			($key, $val ) = ($tmp =~ /(.*)\s*=\s*(.*)\s*/ );
+			$key = uc( $key );
 
-		( $email ) = ( $textReq =~ /Email = (.*?)\n/i );
-		( $cn    ) = ( $textReq =~ /CN = (.*?)\n/i );
-		( $s     ) = ( $textReq =~ /S = (.*?)\n/i );
-		( $l     ) = ( $textReq =~ /L = (.*?)\n/i );
-		( $o     ) = ( $textReq =~ /O = (.*?)\n/i );
-		( $c     ) = ( $textReq =~ /C = (.*?)\n/i );
+			$ret->{$key} = $val;
+		}
 
-		( $approved ) = ( $textReq =~ /APPROVED = (.*?)\n/i );
-		( $notBefore) = ( $textReq =~ /NOTBEFORE = (.*?)\n/i );
-		( $operator ) = ( $textReq =~ /OPERATOR = (.*?)\n/i );
-		( $passwd   ) = ( $textReq =~ /PASSWD = (.*?)\n/i );
-		( $spkac    ) = ( $textReq =~ /SPKAC = (.*?)\n/i );
+		foreach $tmp ( split ( /\n/, $textReq ) ) {
+			if( $tmp =~ /^[\d\.]*OU/ ) {
+				( $tmpOU ) = 
+					( $tmp =~ /^[\d\.]*OU\s*=\s*(.*)/);
 
-		$dn .= "Email=$email" if ($email);
-		$dn .= ", CN=$cn" if ($cn);
-
-		@lines = split ( /\n/, $textReq );
-		foreach $tmp (@lines) {
-			( $tmpOU ) = ( $tmp =~ /^[\d\.]*OU = (.*)/ );
-			if( $tmpOU ) {
-				push @ou, $tmpOU;
-				$dn .= ", OU=$tmpOU";
+				if( $tmpOU ) {
+					push ( @ou, $tmpOU );
+				}
 			}
 		}
 
-		$dn .= ", S=$s" if ($s);
-		$dn .= ", L=$l" if ($l);
-		$dn .= ", O=$o" if ($o);
-		$dn .= ", C=$c" if ($c);
+		if( not exists $ret->{DN} ) {
+			$ret->{DN} = "Email=$ret->{EMAIL}" if ( $ret->{EMAIL});
+			$ret->{DN} .= ", CN=$ret->{CN}" if ($ret->{CN});
+
+			for $tmp ( @ou ) {
+				$ret->{DN} .= ", OU=$tmp";
+			}
+
+			$ret->{DN} .= ", S=$ret->{S}" if ($ret->{S});
+			$ret->{DN} .= ", L=$ret->{L}" if ($ret->{L});
+			$ret->{DN} .= ", O=$ret->{O}" if ($ret->{O});
+			$ret->{DN} .= ", C=$ret->{C}" if ($ret->{C});
+		};
 
 		if ( $format =~ /SPKAC/ ) {
 			## Now retrieve the SPKAC crypto infos...
-			$textReq = $self->{backend}->SPKAC( SPKAC=>"$body" );
+			$textReq=$self->{backend}->SPKAC( SPKAC=>$ret->{BODY});
 
-			## In SPKAC files we do not have versions, so...
-			$version = 0;
-			$dataType = 'SPKAC';
-			$reqType  = 'SPKAC';
+			$ret->{VERSION} 	= 0;
+			$ret->{TYPE}  		= 'SPKAC';
 
 		} elsif ( $format =~ /RENEW/i ) {
-			$version = 0;
 
-			$dataType = 'RENEW';
-			$reqType  = 'RENEW';
+			$ret->{VERSION} 	= 0;
+			$ret->{TYPE}  		= 'RENEW';
 
-			( $certSer ) = ( $textReq =~ /RENEW = (.*?)\n/i );
+			if ( $ret->{RENEW} % 2 ) {
+				$ret->{RENEW} = "0" . $ret->{RENEW};
+			}
 
-			if ( $certSer % 2 ) {
-				$certSer = "0" . $certSer;
+		} elsif ( $format =~ /REVOKE/i ) {
+
+			$ret->{VERSION} 	= 0;
+			$ret->{TYPE}  		= 'REVOKE';
+
+			if ( $ret->{REVOKE} % 2 ) {
+				$ret->{REVOKE} = "0" . $ret->{REVOKE};
 			}
 		}
 		
 	} else {
 		$textReq = $self->{backend}->dataConvert( DATA=>$textReq,
-				DATATYPE=>REQUEST,
-				INFORM=>$format,
-				OUTFORM=>TXT);
+			DATATYPE=>"REQUEST", INFORM=>$format, OUTFORM=>"TXT");
 
 		return if ( not $textReq );
 
 		## Specific for NON SPKAC requests ...
-        	( $version ) = ( $textReq =~ /Version: ([a-e\d]+)/i );
-        	( $dn ) = ( $textReq =~ /Subject: ([^\n]+)/i );
-	
+        	( $ret->{VERSION} ) = ( $textReq =~ /Version: ([a-e\d]+)/i );
+        	( $ret->{DN} ) = ( $textReq =~ /Subject: (.*)\n/i );
+
+               	( $ret->{EMAIL} ) = ( $ret->{DN} =~ /Email=(\S+\@\S+)[\,\/]/i );
+               	( $ret->{CN}    ) = ( $ret->{DN} =~ /CN=(.*?)[\,\/\n]/i );
+               	( $ret->{L}     ) = ( $ret->{DN} =~ /L=(.*?)[\,\/\n]/i );
+               	( $ret->{S}     ) = ( $ret->{DN} =~ /S=(.*?)[\,\/\n]/i );
+               	( $ret->{O}     ) = ( $ret->{DN} =~ /O=(.*?)[\,\/\n]/i );
+
+               	( $ret->{C}     ) = ( $ret->{DN} =~ /C=(\S+)[\,\/\n]*/i );
+
 		## Split the Subject into separate fields
-        	@dnList = split( /\,\//, $dn );
-		my $tmpOU;
-
-               	( $email ) = ( $dn =~ /Email=([^\,^\/]+)/i );
-               	( $cn    ) = ( $dn =~ /CN=([^\,^\/]+)/i );
-               	( $l     ) = ( $dn =~ /L=([^\,^\/]+)/i );
-               	( $s     ) = ( $dn =~ /S=([^\,^\/]+)/i );
-
+        	@dnList = grep ( /OU=/ , 
+				grep( ! /,/ , split( /(\, |\/)/, $ret->{DN} )));
         	## Analyze each field
         	foreach $tmp (@dnList) {
                 	next if ( not $tmp );
 
                 	## The OU variable is a list
-			if( $tmp =~ /OU=/i ) {
-	                        ( $tmpOU ) = ( $tmp =~ /OU=(.*)/i );
-                        	push @ou, $tmpOU;
-        		}
+			( $tmpOU ) = ( $tmp =~ /OU=(.*)/i );
+                       	push ( @{$ret->{OU}}, $tmpOU );
 		}
 
-               	( $o     ) = ( $dn =~ /O=([^\,^\/]+)/i );
-               	( $c     ) = ( $dn =~ /C=([^\,^\/]+)/i );
-
-
 		## We do not verify signature, here...
-		$signature = "OK";
-		$reqType    = 'PKCS#10';
-		$dataType   = 'PKCS#10';
+		$ret->{VERSION} 	= 0;
+		$ret->{TYPE}  		= 'PKCS#10';
 	}
 
 	## Common Request Parsing ...
-	( $pkalg ) = ( $textReq =~ /Public Key Algorithm: ([^\n]+)/i );
-        ( $exponent ) = ( $textReq =~ /publicExponent: ([\d]+)/i );
-        ( $modulus ) = ( $textReq =~ /Public Key: \(([\d]+)/i );
+	( $ret->{PK_ALGORITHM})=($textReq =~ /Public Key Algorithm: ([^\n]+)/i);
+        ( $ret->{EXPONENT} ) = ( $textReq =~ /Exponent: ([\d]+)/i );
+       	( $ret->{KEYSIZE} )  = ( $textReq =~ /Modulus[\s]*\(([\d]+)/gi );
 
-	( $sigAlg ) = ( $textReq =~ /Signature Algorithm: (.*?)\n/ );
+	( $ret->{SIG_ALGORITHM})=($textReq =~ /Signature Algorithm: (.*?)\n/ );
 
-	if( $isSigned ) {
-		$reqType .= " with PKCS#7 Signature";
-	}
+	$ret->{TYPE} .= " with PKCS#7 Signature" if ( $ret->{SIGNATURE} );
 
-        my $ret = {
-		    DATATYPE=>$dataType,
-		    TYPE=>$reqType,
-		    SERIAL=>$serial,
-		    RENEW=>$certSer,
-		    VERSION=>$version,
-		    OPERATOR=> $operator,
-		    APPROVED=>$approved,
-		    NOT_BEFORE=>$notBefore,
-		    PASSWD=>$passwd,
-                    DN => $dn,
-                    EMAIL => $email,
-                    CN => $cn,
-                    OU => [ @ou ],
-                    O => $o,
-                    C => $c,
-		    L => $l,
-		    S => $s,
-                    PK_ALGORITHM => $pkalg,
-                    MODULUS => $modulus,
-                    EXPONENT => $exponent,
-		    SIGNATURE_ALGORITHM=> $sigAlg,
-		    BODY=> $body,
-		    SPKAC=> $spkac,
-		    PKCS7_SIGNATURE=> $signature,
-                    EXTS => [ @exts ] };
-	
 	return $ret;
 }
 
@@ -397,14 +447,14 @@ sub getTXT {
 		$ret =  $self->{req} . 
 			$self->{backend}->SPKAC( $self->{spkacREQ} );
 		return $ret;
-	} elsif( $self->{reqFormat} =~ /RENEW/i ) {
+	} elsif( $self->{reqFormat} =~ /RENEW|REVOKE/i ) {
 		return if( not $self->{renewREQ} );
 
 		$ret =  $self->{req};
 		return $ret;
 	} else {
-		return if ( not $txtREQ );
-		return $txtREQ;
+		return if ( not $self->{txtREQ} );
+		return $self->{txtREQ};
 	}
 }
 
@@ -413,7 +463,7 @@ sub getPEM {
 	my $ret;
 
 	return if( $self->{reqFormat} =~ /SPKAC/i );
-	return if( $self->{reqFormat} =~ /RENEW/i );
+	return if( $self->{reqFormat} =~ /RENEW|REVOKE/i );
 	return if ( not $self->{pemREQ} );
 
 	return $self->{pemREQ};
@@ -424,7 +474,7 @@ sub getDER {
 	my $ret;
 
 	return if( $self->{reqFormat} =~ /SPKAC/i );
-	return if( $self->{reqFormat} =~ /RENEW/i );
+	return if( $self->{reqFormat} =~ /RENEW|REVOKE/i );
 	return if ( not $self->{derREQ} );
 
 	return $self->{derREQ};
@@ -446,10 +496,22 @@ OpenCA::REQ - Perl extension to easily manage Cert REQUESTs
 
 =head1 DESCRIPTION
 
-Sorry, no help available. Take a look at the prova.pl file wich
-contains most of the functions available here.
+Sorry, no help available. The REQ module is capable of importing
+request like this:
 
-Blah blah blah.
+	-----BEGIN HEADER-----
+	VAR = NAME
+	VAR = NAME
+	...
+	-----END HEADER-----
+	(real request text here)
+	-----BEGIN PKCS7-----
+	(pkcs#7 signature here
+	-----END PKCS7-----
+
+The Real request text can be a request in every form ( DER|PEM ) or
+textual (called SPKAC|RENEW|REVOKE datatype). The syntax of the latters
+is VAR = NAME on each line (just like the HEADER section).
 
 =head1 AUTHOR
 
