@@ -54,7 +54,7 @@ use strict;
 
 package OpenCA::REQ;
 
-$OpenCA::REQ::VERSION = '0.7.10a';
+$OpenCA::REQ::VERSION = '0.7.31a';
 
 my %params = (
 	req => undef,
@@ -248,7 +248,7 @@ sub getHeader {
 	if( ($txt) = ( $req =~ /$beginHeader\n([\s\S\n]+)\n$endHeader/) ) {
 		foreach $i ( split ( /\n/, $txt ) ) {
 			$i =~ s/\s*=\s*/=/;
-			( $key, $val ) = ( $i =~ /(.*)\s*=\s*(.*)\s*/ );
+			( $key, $val ) = ( $i =~ /^([^=]*)\s*=\s*(.*)\s*/ );
 			$ret->{$key} = $val;
 		}
 	}
@@ -288,10 +288,12 @@ sub getBody {
 	my $endSig 		= $self->{endSignature};
 
 	## Let's throw away text between the two headers, included
-	$ret =~ s/($beginHeader[\S\s\n]+$endHeader\n)//;
+	$ret =~ s/($beginHeader[\S\s\n]+$endHeader\n*)//;
 
 	## Let's throw away text between the two headers, included
 	$ret =~ s/($beginSig[\S\s\n]+$endSig)//;
+
+	$ret =~ s/\n$//;
 
 	return $ret
 }
@@ -306,12 +308,6 @@ sub parseReq {
         my @dnList = ();
 	my @ou = ();
 	my @exts = ();
-
-        ## my ( $dn, $email, $cn, $s, $l, $o, $c, $spkac );
-        ## my ( $pkalg, $modulus, $exponent, $version );
-	## my ( $serial, $certSer, $passwd, $approved, $operator );
-	## my ( $notBefore, $dataType, $reqType, $sigAlg );
-        ## my ( $tmp, $tmpOU, $signature, $ra, $body, $textReq );
 
 	my ( $ret, $tmp, $key, $val, $tmpOU, $ra, $textReq );
 
@@ -332,23 +328,23 @@ sub parseReq {
 
 		@reqLines = split( /\n/ , $textReq );
 		for $tmp (@reqLines) {
-			$tmp =~ s/\s*=\s*/=/;
-			($key, $val ) = ($tmp =~ /(.*)\s*=\s*(.*)\s*/ );
-			$key = uc( $key );
 
-			$ret->{$key} = $val;
-		}
-
-		foreach $tmp ( split ( /\n/, $textReq ) ) {
 			if( $tmp =~ /^[\d\.]*OU/ ) {
-				( $tmpOU ) = 
-					( $tmp =~ /^[\d\.]*OU\s*=\s*(.*)/);
+				my $tmpOU;
 
-				if( $tmpOU ) {
-					push ( @ou, $tmpOU );
-				}
+				( $tmpOU ) = ( $tmp =~ /OU\s*=\s*(.*)/);
+				push ( @ou, $tmpOU );
+
+			} else {
+				## $tmp =~ s/\s*=\s*/=/;
+				($key,$val)=($tmp =~ /([\w]+)\s*=\s*(.*)\s*/ );
+				$key = uc( $key );
+
+				$ret->{$key} = $val;
 			}
 		}
+
+		$ret->{OU} = [ @ou ];
 
 		if( not exists $ret->{DN} ) {
 			$ret->{DN} = "Email=$ret->{EMAIL}" if ( $ret->{EMAIL});
@@ -368,12 +364,12 @@ sub parseReq {
 			## Now retrieve the SPKAC crypto infos...
 			$textReq=$self->{backend}->SPKAC( SPKAC=>$ret->{BODY});
 
-			$ret->{VERSION} 	= 0;
+			$ret->{VERSION} 	= 1;
 			$ret->{TYPE}  		= 'SPKAC';
 
 		} elsif ( $format =~ /RENEW/i ) {
 
-			$ret->{VERSION} 	= 0;
+			$ret->{VERSION} 	= 1;
 			$ret->{TYPE}  		= 'RENEW';
 
 			if ( $ret->{RENEW} % 2 ) {
@@ -382,7 +378,7 @@ sub parseReq {
 
 		} elsif ( $format =~ /REVOKE/i ) {
 
-			$ret->{VERSION} 	= 0;
+			$ret->{VERSION} 	= 1;
 			$ret->{TYPE}  		= 'REVOKE';
 
 			if ( $ret->{REVOKE} % 2 ) {
@@ -400,13 +396,15 @@ sub parseReq {
         	( $ret->{VERSION} ) = ( $textReq =~ /Version: ([a-e\d]+)/i );
         	( $ret->{DN} ) = ( $textReq =~ /Subject: (.*)\n/i );
 
-               	( $ret->{EMAIL} ) = ( $ret->{DN} =~ /Email=(\S+\@\S+)[\,\/]/i );
-               	( $ret->{CN}    ) = ( $ret->{DN} =~ /CN=(.*?)[\,\/\n]/i );
-               	( $ret->{L}     ) = ( $ret->{DN} =~ /L=(.*?)[\,\/\n]/i );
-               	( $ret->{S}     ) = ( $ret->{DN} =~ /S=(.*?)[\,\/\n]/i );
-               	( $ret->{O}     ) = ( $ret->{DN} =~ /O=(.*?)[\,\/\n]/i );
+               	( $ret->{EMAIL} ) = ($ret->{DN}=~ 
+					/Email=([^\,\/\n]+\@[^\,\/\n]+)/i);
 
-               	( $ret->{C}     ) = ( $ret->{DN} =~ /C=(\S+)[\,\/\n]*/i );
+               	( $ret->{CN}    ) = ( $ret->{DN} =~ /CN=([^\,\/\n]+)/i );
+               	( $ret->{L}     ) = ( $ret->{DN} =~ /L=([^\,\/\n]+)/i );
+               	( $ret->{S}     ) = ( $ret->{DN} =~ /S=([^\,\/\n]+)/i );
+               	( $ret->{O}     ) = ( $ret->{DN} =~ /O=([^\,\/\n]+)/i );
+
+               	( $ret->{C}     ) = ( $ret->{DN} =~ /C=([^\,\/\n]+)/i );
 
 		## Split the Subject into separate fields
         	@dnList = grep ( /OU=/ , 
@@ -421,8 +419,12 @@ sub parseReq {
 		}
 
 		## We do not verify signature, here...
-		$ret->{VERSION} 	= 0;
-		$ret->{TYPE}  		= 'PKCS#10';
+		## $ret->{VERSION} 	= 0;
+		if( exists $ret->{HEADER}->{TYPE} ) {
+			$ret->{TYPE} = $ret->{HEADER}->{TYPE};
+		} else {
+			$ret->{TYPE}  		= 'PKCS#10';
+		}
 	}
 
 	## Common Request Parsing ...
@@ -436,6 +438,33 @@ sub parseReq {
 
 	return $ret;
 }
+
+sub update {
+	my $self = shift;
+	my $keys = { @_ };
+
+	my ( $target, $key, $val );
+	
+	## We actually can modify only TEXT requests...
+	return if ( $self->getParsed()->{TYPE} !~ /SPKAC|RENEW|REVOKE/ );
+
+	while ( ($key, $val) = each %$keys ) {
+
+		if( exists($self->getParsed()->{HEADER}->{$key})) {
+			$target = $self->getParsed()->{HEADER};
+		} else {
+			$target = $self->getParsed();
+		}
+
+		if ( exists($target->{$key}) ) {
+			$self->{req} =~ s/^($key\s*=\s*)(.*?)$/$1$val/m;
+			$self->{item} = $self->{req};
+
+			$target = $val;
+		}
+	}
+}
+
 
 sub getTXT {
 	my $self = shift;
