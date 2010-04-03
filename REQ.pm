@@ -9,7 +9,7 @@
 ## lhash, DES, etc., code; not just the SSL code.  The documentation
 ## included with this distribution is covered by the same copyright terms
 ## 
-## Copyright remains Massimiliano Pala's, and as such any Copyright notices
+## // Copyright remains Massimiliano Pala's, and as such any Copyright notices
 ## in the code are not to be removed.
 ## If this package is used in a product, Massimiliano Pala should be given
 ## attribution as the author of the parts of the library used.
@@ -26,8 +26,8 @@
 ##    documentation and/or other materials provided with the distribution.
 ## 3. All advertising materials mentioning features or use of this software
 ##    must display the following acknowledgement:
-##    "This product includes OpenCA software written by Massimiliano Pala
-##     (madwolf@openca.org) and the OpenCA Group (www.openca.org)"
+## //   "This product includes OpenCA software written by Massimiliano Pala
+## //    (madwolf@openca.org) and the OpenCA Group (www.openca.org)"
 ## 4. If you include any Windows specific code (or a derivative thereof) from 
 ##    some directory (application code) you must include an acknowledgement:
 ##    "This product includes OpenCA software (www.openca.org)"
@@ -78,7 +78,7 @@ package OpenCA::REQ;
 
 our ($errno, $errval);
 
-($OpenCA::REQ::VERSION = '$Revision: 1.52 $' )=~ s/(?:^.*: (\d+))|(?:\s+\$$)/defined $1?"0\.9":""/eg;
+($OpenCA::REQ::VERSION = '$Revision: 1.6 $' )=~ s/(?:^.*: (\d+))|(?:\s+\$$)/defined $1?"0\.9":""/eg;
 
 my %params = (
 	req            => undef,
@@ -133,8 +133,8 @@ sub new {
 	$self->{endHeader} 	= "-----END HEADER-----";
 	$self->{beginSignature} = "-----BEGIN PKCS7-----";
 	$self->{endSignature} 	= "-----END PKCS7-----";
-	$self->{beginKey}	= "-----BEGIN ENCRYPTED PRIVATE KEY-----";
-	$self->{endKey} 	= "-----END ENCRYPTED PRIVATE KEY-----";
+	$self->{beginKey}	= "-----BEGIN .*PRIVATE KEY-----";
+	$self->{endKey} 	= "-----END .*PRIVATE KEY-----";
 	$self->{beginAttribute}	= "-----BEGIN ATTRIBUTE-----";
 	$self->{endAttribute}	= "-----END ATTRIBUTE-----";
 	$self->{reqFormat}      = "";
@@ -146,25 +146,31 @@ sub new {
         $self->{reqFormat} = ( $keys->{FORMAT} or $keys->{INFORM} );
 
         $self->{backend}    = $keys->{SHELL};
+        $self->{gettext}    = $keys->{GETTEXT};
         $infile     = $keys->{INFILE};
 	$keyfile    = $keys->{KEYFILE};
 	
-	return $self->setError (7211011, "OpenCA::REQ->new: The backend is not specified.") if (not $self->{backend});
+	return $self->setError (7211010, "OpenCA::REQ->new: The translation function is not specified.")
+            if (not $self->{gettext});
+	return $self->setError (7211011,
+            $self->{gettext} ("OpenCA::REQ->new: The backend is not specified."))
+            if (not $self->{backend});
 
 	if( $keyfile ) {
 		if ( not defined $self->{reqFormat} or not $self->{reqFormat} ) {
 			$self->{reqFormat} = "PEM";
 		}
-		$self->{req} = $self->{backend}->genReq( KEYFILE=>$keys->{KEYFILE},
+		$self->{req} = $self->{backend}->genReq( 
+				  KEYFILE=>$keys->{KEYFILE},
 				  DN=>$keys->{DN},
 				  SUBJECT=>$keys->{SUBJECT},
 				  OUTFORM=>$self->{reqFormat},
 				  PASSWD=>$keys->{PASSWD} );
 
 		return $self->setError (7211021,
-			"OpenCA::REQ->new: Cannot create new request.\n".
-			"Backend fails with errorcode ".$OpenCA::OpenSSL::errno."\n".
-			$OpenCA::OpenSSL::errval)
+			   $self->{gettext} ("OpenCA::REQ->new: Cannot create new request. Backend fails with errorcode __ERRNO__. __ERRVAL__",
+                                             "__ERRNO__", $OpenCA::OpenSSL::errno,
+			                     "__ERRVAL__", $OpenCA::OpenSSL::errval))
 			if ( not $self->{req} );
 	}
 
@@ -173,13 +179,16 @@ sub new {
 
                 open(FD, "<$infile" ) or
 			return $self->setError (7211031,
-						 "OpenCA::REQ->new: Cannot open infile $infile for reading.");
+			           $self->{gettext} ("OpenCA::REQ->new: Cannot open infile __FILENAME__ for reading.",
+                                                     "__FILENAME__", $infile));
                 while ( $tmp = <FD> ) {
                         $self->{req} .= $tmp;
                 }
                 close(FD);
 
-		return $self->setError (7211033, "Cannot read request from infile $infile.")
+		return $self->setError (7211033,
+                           $self->{gettext} ("Cannot read request from infile __FILENAME__.",
+                                             "__FILENAME__", $infile))
 			if( not $self->{req});
         }
 
@@ -200,7 +209,9 @@ sub new {
                 if ( not $self->init( REQ=>$self->{req},
                                           FORMAT=>$self->{reqFormat})) {
 			return $self->setError (7211041,
-					"OpenCA::REQ->new: Cannot initialize request (".$errno.")\n".$errval);
+			           $self->{gettext} ("OpenCA::REQ->new: Cannot initialize request (__ERRNO__). __ERRVAL__",
+                                                     "__ERRNO__", $errno,
+                                                     "__ERRVAL__", $errval));
                 }
 
         }
@@ -218,8 +229,10 @@ sub init {
 	if (not $self->{req}) {
        		$self->{parsedItem} = $self->parseReq( REQ=>$keys->{REQ},
 						FORMAT=>$self->{reqFormat} );
-		return $self->setError (7212011, "OpenCA::REQ->init: Cannot parse request ".
-						"($errno):\n$errval")
+		return $self->setError (7212011,
+                           $self->{gettext} ("OpenCA::REQ->init: Cannot parse request (__ERRNO__). __ERRVAL__",
+                                             "__ERRNO__", $errno,
+                                             "__ERRVAL__", $errval))
 			if (not $self->{parsedItem});
 	} elsif( $self->{reqFormat} !~ /SPKAC|CRR/i ) {
 		$self->{pemREQ} = "";
@@ -228,8 +241,10 @@ sub init {
 
 		$self->{parsedItem} = $self->parseReq( REQ=>$keys->{REQ},
 						FORMAT=>$self->{reqFormat} );
-		return $self->setError (7212024, "OpenCA::REQ->init: Cannot parse request ".
-						"($errno):\n$errval")
+		return $self->setError (7212024,
+                           $self->{gettext} ("OpenCA::REQ->init: Cannot parse request (__ERRNO__). __ERRVAL__",
+                                             "__ERRNO__", $errno,
+                                             "__ERRVAL__", $errval))
 			if (not $self->{parsedItem});
 	} else {
 
@@ -239,8 +254,10 @@ sub init {
 							FORMAT=>"SPKAC" );
 			$self->{parsedItem} = $self->{parsedSPKAC};
 
-			return $self->setError (7212026, "OpenCA::REQ->init: Cannot parse request ".
-                                                "($errno):\n$errval")
+			return $self->setError (7212026,
+                           $self->{gettext} ("OpenCA::REQ->init: Cannot parse request (__ERRNO__). __ERRVAL__",
+                                             "__ERRNO__", $errno,
+                                             "__ERRVAL__", $errval))
 				if( not $self->{parsedSPKAC} );
 
 		} elsif ( $self->{reqFormat} =~ /CRR/ ) {
@@ -250,11 +267,14 @@ sub init {
 					FORMAT=>"CRR" );
 			$self->{parsedItem} = $self->{parsedCRR};
 
-			return $self->setError (7212031, "OpenCA::REQ->init: Cannot parse request ".
-                                                "($errno):\n$errval")
+			return $self->setError (7212031,
+                           $self->{gettext} ("OpenCA::REQ->init: Cannot parse request (__ERRNO__). __ERRVAL__",
+                                             "__ERRNO__", $errno,
+                                             "__ERRVAL__", $errval))
 				if( not $self->{parsedCRR} );
 		} else {
-			return $self->setError (7212041, "OpenCA::REQ->init: Unknown request's format.");
+			return $self->setError (7212041,
+                                   $self->{gettext} ("OpenCA::REQ->init: Unknown request's format."));
 		}
 	}
 
@@ -265,15 +285,18 @@ sub getParsed {
         my $self = shift;
 
 	if( $self->{reqFormat} =~ /SPKAC/i ) {
-		return $self->setError (7221011, "OpenCA::REQ->getParsed: SPKAC-request was not parsed.")
+		return $self->setError (7221011,
+                           $self->{gettext} ("OpenCA::REQ->getParsed: SPKAC-request was not parsed."))
 			if( not $self->{parsedSPKAC} );
 		return $self->{parsedSPKAC};
 	} elsif( $self->{reqFormat} =~ /CRR/i ) {
-		return $self->setError (7221013, "OpenCA::REQ->getParsed: CRR was not parsed.")
+		return $self->setError (7221013,
+                           $self->{gettext} ("OpenCA::REQ->getParsed: CRR was not parsed."))
 			if( not $self->{parsedCRR} );
 		return $self->{parsedCRR};
 	} else {
-        	return $self->setError (7221014, "OpenCA::REQ->getParsed: Request was not parsed.")
+        	return $self->setError (7221014,
+                           $self->{gettext} ("OpenCA::REQ->getParsed: Request was not parsed."))
 			if ( not $self->{parsedItem} );
         	return $self->{parsedItem};
 	}
@@ -292,7 +315,10 @@ sub getHeader {
 	my $endAttribute = $self->{endAttribute};
 
 	if( ($txt) = ( $req =~ /$beginHeader\s*\n([\s\S\n]+)\n$endHeader/) ) {
-                my $active_multirow = 0;
+                my $active_multirow = undef;
+
+		$active_multirow = 0;
+		$key = "";
 		foreach $i ( split ( /\s*\n/, $txt ) ) {
                         if ($active_multirow) {
                           ## multirow
@@ -321,9 +347,12 @@ sub getHeader {
 			  }
                         }
 
-
 		}
 	}
+
+	# foreach $i ( keys %$ret ) {
+	# 	print STDERR "REQ::getHeader()->$i => " . $ret->{$i} . "\n";
+	# }
 
 	return $ret;
 }
@@ -344,6 +373,7 @@ sub getSignature {
 	my $self = shift;
 	my $keys = { @_ };
 	my $req = $keys->{REQUEST};
+	return $self->getParsed()->{SIGNATURE} if (not $req);
 
 	my $beginSig 	= $self->{beginSignature};
 	my $endSig 	= $self->{endSignature};
@@ -359,6 +389,10 @@ sub getKey {
 
 	my $beginKey 	= $self->{beginKey};
 	my $endKey 	= $self->{endKey};
+
+	if ( not $req ) {
+		$req = $self->{item};
+	}
 
 	my ( $ret ) = ( $req =~ /($beginKey[\S\s\n]+$endKey)/ );
 	return $ret;
@@ -380,16 +414,19 @@ sub getBody {
 	my $beginKey 		= $self->{beginKey};
 	my $endKey 		= $self->{endKey};
 
-	## Let's throw away text between the two headers, included
+	## Let us throw away text between the two headers, included
 	$ret =~ s/($beginHeader[\S\s\n]+$endHeader\n*)//;
 
-	## Let's throw away text between the two headers, included
+	## Let us throw away text between the two headers, included
 	$ret =~ s/($beginSig[\S\s\n]+$endSig)//;
 
-	## Let's throw away text between the two headers, included
+	## Let us throw away text between the two headers, included
 	$ret =~ s/($beginKey[\S\s\n]+$endKey)//;
 
-	$ret =~ s/\n$//;
+	## Let us throw away leading and trailing nonse
+	## this is important for signature handling
+	$ret =~ s/^[\r\n]*//s;
+	$ret =~ s/[\r\n]*$//s;
 
 	return $ret;
 }
@@ -406,7 +443,8 @@ sub parseReq {
 
 	my ( $ret, $tmp, $key, $val, $tmpOU, $ra, $textReq );
 
-	return $self->setError (7213011, "There is no complete request available.")
+	return $self->setError (7213011,
+                   $self->{gettext} ("There is no complete request available."))
 		if (not $fullReq);
 
 	## timing test
@@ -417,10 +455,10 @@ sub parseReq {
 	#$self->{DEBUG_SPEED} = 1;
 
 	$ret->{SIGNATURE}         = $self->getSignature ( REQUEST=>$fullReq );
-	$ret->{KEY}               = $self->getKey       ( REQUEST=>$fullReq );
+	$ret->{PRIVKEY}           = $self->getKey       ( REQUEST=>$fullReq );
 	$ret->{HEADER}            = $self->getHeader    ( REQUEST=>$fullReq );
 	$ret->{RAWHEADER}         = $self->getRawHeader ( REQUEST=>$fullReq );
-	$ret->{BODY}              = $self->getBody      ( REQUEST=> $fullReq);
+	$ret->{BODY}              = $self->getBody      ( REQUEST=>$fullReq );
 	$ret->{ITEM}              = $self->{item};
 
 	#print "OpenCA::REQ->parseReq: split_time_1=".tv_interval($start)."<br>\n"
@@ -428,15 +466,16 @@ sub parseReq {
 
 	if (not $ret->{BODY}) {
 		## this must be a request with TYPE == HEADER
-		print "OpenCA::REQ->parseReq: This is a HEADER only.<br>\n" if ($self->{DEBUG});
+		print $self->{gettext} ("OpenCA::REQ->parseReq: This is a HEADER only.")."<br>\n"
+                    if ($self->{DEBUG});
 
 		if ( not $ret->{HEADER} ) {
 			return $self->setError (7213015,
-				"OpenCA::REQ->init: The request has no body.");
+				   $self->{gettext} ("OpenCA::REQ->init: The request has no body."));
 		}
 		if ( not $ret->{HEADER}->{TYPE} =~ /HEADER/i ) {
 			return $self->setError (7213016,
-				"OpenCA::REQ->init: The request has no body and has not the type HEADER.");
+				   $self->{gettext} ("OpenCA::REQ->init: The request has no body and has not the type HEADER."));
 		}
 
 		$ret->{TYPE}  = "HEADER";
@@ -456,7 +495,7 @@ sub parseReq {
 				              "SIGNATURE_ALGORITHM" );
 			} else {
 				@attrlist = ( "DN", "VERSION", "SIGNATURE_ALGORITHM",
-				              "PUBKEY", "KEYSIZE", "PUBKEY_ALGORITHM", "EXPONENT", "MODULUS" );
+				              "PUBKEY", "KEYSIZE", "PUBKEY_ALGORITHM", "EXPONENT", "MODULUS", "EXTENSIONS" );
 			}
 			#print "OpenCA::REQ->parseReq: split_time_1_4=".tv_interval($start)."<br>\n"
 			#	if ($self->{DEBUG_SPEED});
@@ -464,6 +503,43 @@ sub parseReq {
 						 ATTRIBUTE_LIST=>\@attrlist, INFORM=>$format );
 			#print "OpenCA::REQ->parseReq: split_time_1_5=".tv_interval($start)."<br>\n"
 			#	if ($self->{DEBUG_SPEED});
+
+			$ret->{PLAIN_EXTENSIONS} = $attrs->{EXTENSIONS};
+			$ret->{OPENSSL_EXTENSIONS} = {};
+			delete $attrs->{EXTENSIONS};
+
+			# parse extensions
+			my @lines = split(/\n/, $ret->{PLAIN_EXTENSIONS});
+			my $i = 0;
+			while($i < scalar(@lines)) {
+			    if($lines[$i] =~ /^\s*([^:]+):\s*(?:critical|)\s*$/i) {
+				my ($val, $key);
+				$key = $1;
+				$ret->{OPENSSL_EXTENSIONS}->{$key} = [];
+				$i++;
+				while(exists $lines[$i] and $lines[$i] !~ /^\s*[^:]+:\s*(?:critical|)\s*$/ && $i < scalar(@lines)) {
+				    $val = $lines[$i];
+				    $val =~ s/^\s+//;
+				    $val =~ s/\s+$//;
+				    $i++;
+				    next if $val =~ /^$/;
+				    push(@{$ret->{OPENSSL_EXTENSIONS}->{$key}}, $val);
+				}
+			    } else {
+				## FIXME: can this ever happen?
+				$i++;
+			    }
+			}
+			
+			if ($self->{DEBUG}) {
+			    print "OpenCA::REQ->parseReq: show all extensions and their values<br>\n";
+			    while(my ($key, $val) = each(%{$ret->{OPENSSL_EXTENSIONS}})) {
+				print "OpenCA::REQ->parseReq: found extension: $key<br>\n";
+				print "OpenCA::REQ->parseReq: with value(s):       $_<br>\n" foreach(@{$val});
+			    }
+			}
+
+
 			foreach (keys %$attrs ) {
 				$ret->{$_} = $attrs->{$_};
 				if ($self->{DEBUG}) {
@@ -588,6 +664,8 @@ sub parseReq {
 	#	if ($self->{DEBUG_SPEED});
 
 	if ($fixed_dn =~ /[\\+]/) {
+		$fixed_dn =~ s/\w+=\s*\,//g;
+                $fixed_dn =~ s/\w+=\s*$//;
 		my $x500_dn = X500::DN->ParseRFC2253 ($fixed_dn);
 		foreach $rdn ($x500_dn->getRDNs()) {
 			next if ($rdn->isMultivalued());
@@ -620,33 +698,16 @@ sub parseReq {
 	}
 
 	## set emailaddress
-	## FIXME: actually we ignore the subject alternative name in the header
-	## FIXME: this is a BUG
-	if ($ret->{HEADER}->{SUBJECT_ALT_NAME} and
-	    ( ($ret->{HEADER}->{SUBJECT_ALT_NAME} =~ /^\s*email\s*:/i) or
-	      ($ret->{HEADER}->{SUBJECT_ALT_NAME} =~ /,\s*email\s*:/i) ) ) {
-		( $ret->{EMAILADDRESS} ) = 
-			( $ret->{HEADER}->{SUBJECT_ALT_NAME} =~ 
-				/^\s*email\s*:\s*([^,]*),?/ );
-		if (not $ret->{EMAILADDRESS}) {
-			( $ret->{EMAILADDRESS} ) = 
-				( $ret->{HEADER}->{SUBJECT_ALT_NAME} =~ 
-					/,\s*email\s*:\s*([^,]*),?/ );
-		}
-	} elsif (
-		##$ret->{HEADER}->{SUBJECT} and 
-	    $ret->{DN_HASH}->{EMAILADDRESS} and
-	    $ret->{DN_HASH}->{EMAILADDRESS}[0]) {
-		$ret->{EMAILADDRESS} = $ret->{DN_HASH}->{EMAILADDRESS}[0];
-	##} else {
-	##	$ret->{EMAILADDRESS} = $ret->{DN_HASH}->{EMAILADDRESS}[0];
-	}
+
+	$ret->{EMAILADDRESSES} = [ $self->get_emails ($ret) ];
+	$ret->{EMAILADDRESS} = $ret->{EMAILADDRESSES}->[0];
+
 	if ($self->{DEBUG}) {
 		print "OpenCA::REQ->parseReq: SUBJECT_ALT_NAME: ".$ret->{HEADER}->{SUBJECT_ALT_NAME}."<br>\n";
 		print "OpenCA::REQ->parseReq: EMAILADDRESS: ".$ret->{EMAILADDRESS}."<br>\n";
 	}
 
-	if ($ret->{HEADER}->{TYPE} !~ /HEADER/) {
+	if (exists $ret->{HEADER}->{TYPE} and $ret->{HEADER}->{TYPE} !~ /HEADER/) {
 		## Common Request Parsing ...
 		$ret->{PK_ALGORITHM}  = $ret->{PUBKEY_ALGORITHM};
 		$ret->{SIG_ALGORITHM} = $ret->{SIGNATURE_ALGORITHM};
@@ -670,16 +731,16 @@ sub getTXT {
 	my $ret;
 
 	if( $self->{reqFormat} =~ /SPKAC/i ) {
-		return $self->setError (7241011, "OpenCA::REQ->getTXT: The request should be in SPKAC-format ".
-					"but there is no SPKAC-request.")
+		return $self->setError (7241011,
+                           $self->{gettext} ("OpenCA::REQ->getTXT: The request should be in SPKAC-format but there is no SPKAC-request."))
 			if( not $self->{spkacREQ} );
 
 		$ret =  $self->{req} . 
 			$self->{backend}->SPKAC( SPKAC => $self->{spkacREQ} );
 		return $ret;
 	} elsif( $self->{reqFormat} =~ /CRR/i ) {
-		return	$self->setError (7241013, "OpenCA::REQ->getTXT: The request should be a CRR ".
-					"but there is no such request.")
+		return	$self->setError (7241013,
+                            $self->{gettext} ("OpenCA::REQ->getTXT: The request should be a CRR but there is no such request."))
 			if( not $self->{revokeREQ} );
 
 		$ret =  $self->{req};
@@ -687,18 +748,19 @@ sub getTXT {
 	} else {
 		if (not $self->{txtREQ}) {
 			$self->{txtREQ} = $self->{backend}->dataConvert(
-			                                        DATA=>$self->{req},
-			                                        DATATYPE=>"REQUEST",
-			                                        INFORM=>$self->{reqFormat},
-			                                        OUTFORM=>"TXT" );
-			return $self->setError (7241021, "OpenCA::REQ->init: Cannot convert request to TXT-format ".
-							"(".$OpenCA::OpenSSL::errno."):\n".
-							$OpenCA::OpenSSL::errval)
+			         DATA=>$self->{req},
+			         DATATYPE=>"REQUEST",
+			         INFORM=>$self->{reqFormat},
+			         OUTFORM=>"TXT" );
+			return $self->setError (7241021,
+                                   $self->{gettext} ("OpenCA::REQ->init: Cannot convert request to TXT-format (__ERRNO__). __ERRVAL__",
+                                                     "__ERRNO__", $OpenCA::OpenSSL::errno,
+                                                     "__ERRVAL__", $OpenCA::OpenSSL::errval))
 				if (not $self->{txtREQ});
 		}
 
-		return $self->setError (7241015, "OpenCA::REQ->getTXT: The request should be a TXT-request ".
-					"but there is no TXT-request.")
+		return $self->setError (7241015,
+                           $self->{gettext} ("OpenCA::REQ->getTXT: The request should be a TXT-request but there is no TXT-request."))
 			if ( not $self->{txtREQ} );
 		return $self->{txtREQ};
 	}
@@ -708,9 +770,11 @@ sub getPEM {
 	my $self = shift;
 	my $ret;
 
-	return $self->setError (7242011, "OpenCA::REQ->getPEM: The request is in SPKAC-format and not in PEM-format.")
+	return $self->setError (7242011,
+                   $self->{gettext} ("OpenCA::REQ->getPEM: The request is in SPKAC-format and not in PEM-format."))
 		if( $self->{reqFormat} =~ /SPKAC/i );
-	return $self->setError (7242013, "OpenCA::REQ->getPEM: The request is a CRR.")
+	return $self->setError (7242013,
+                   $self->{gettext} ("OpenCA::REQ->getPEM: The request is a CRR."))
 		if( $self->{reqFormat} =~ /CRR/i );
 
 	if ( $self->{reqFormat} eq 'PEM' ) {
@@ -719,17 +783,19 @@ sub getPEM {
 	}
 	if (not $self->{pemREQ}) {
     	$self->{pemREQ} = $self->{backend}->dataConvert( 
-		                                        DATA=>$self->{req},
-		                                        DATATYPE=>"REQUEST",
-		                                        INFORM=>$self->{reqFormat},
-		                                        OUTFORM=>"PEM" );
-		return $self->setError (7242021, "OpenCA::REQ->getPEM: Cannot convert request to PEM-format ".
-						"(".$OpenCA::OpenSSL::errno."):\n".
-						$OpenCA::OpenSSL::errval)
+		       DATA=>$self->{req},
+		       DATATYPE=>"REQUEST",
+		       INFORM=>$self->{reqFormat},
+		       OUTFORM=>"PEM" );
+		return $self->setError (7242021,
+                           $self->{gettext} ("OpenCA::REQ->getPEM: Cannot convert request to PEM-format (__ERRNO__). __ERRVAL__",
+                                             "__ERRNO__", $OpenCA::OpenSSL::errno,
+                                             "__ERRVAL__", $OpenCA::OpenSSL::errval))
 			if (not $self->{pemREQ});
 	}
 
-	return $self->setError (7242015, "OpenCA::REQ->getPEM: The request is not available in PEM-format.")
+	return $self->setError (7242015,
+                   $self->{gettext} ("OpenCA::REQ->getPEM: The request is not available in PEM-format."))
 		if ( not $self->{pemREQ} );
 
 	return $self->{pemREQ};
@@ -739,9 +805,11 @@ sub getDER {
 	my $self = shift;
 	my $ret;
 
-	return $self->setError (7243011, "OpenCA::REQ->getDER: The request is in SPKAC-format and not in DER-format.")
+	return $self->setError (7243011,
+                   $self->{gettext} ("OpenCA::REQ->getDER: The request is in SPKAC-format and not in DER-format."))
 		if( $self->{reqFormat} =~ /SPKAC/i );
-	return $self->setError (7243013, "OpenCA::REQ->getDER: The request is a CRR.")
+	return $self->setError (7243013,
+                   $self->{gettext} ("OpenCA::REQ->getDER: The request is a CRR."))
 		if( $self->{reqFormat} =~ /CRR/i );
 
 	if ( $self->{reqFormat} eq 'DER' ) {
@@ -749,17 +817,19 @@ sub getDER {
 	}
 	if (not $self->{derREQ}) {
 		$self->{derREQ} = $self->{backend}->dataConvert( 
-		                                        DATA=>$self->{req},
-		                                        DATATYPE=>"REQUEST",
-		                                        INFORM=>$self->{reqFormat},
-		                                        OUTFORM=>"DER" );
-		return $self->setError (7243021, "OpenCA::REQ->getDER: Cannot convert request to DER-format ".
-						"(".$OpenCA::OpenSSL::errno."):\n".
-						$OpenCA::OpenSSL::errval)
+		       DATA=>$self->{req},
+		       DATATYPE=>"REQUEST",
+		       INFORM=>$self->{reqFormat},
+		       OUTFORM=>"DER" );
+		return $self->setError (7243021,
+                           $self->{gettext} ("OpenCA::REQ->getDER: Cannot convert request to DER-format (__ERRNO__). __ERRVAL__",
+                                             "__ERRNO__", $OpenCA::OpenSSL::errno,
+                                             "__ERRVAL__", $OpenCA::OpenSSL::errval))
 			if (not $self->{derREQ});
 	}
 
-	return $self->setError (7243015, "OpenCA::REQ->getDER: The request is not available in DER-format.")
+	return $self->setError (7243015,
+                   $self->{gettext} ("OpenCA::REQ->getDER: The request is not available in DER-format."))
 		if ( not $self->{derREQ} );
 
 	return $self->{derREQ};
@@ -812,9 +882,10 @@ sub setHeaderAttribute {
   my $endAttribute = $self->{endAttribute};
 
   ## check format to be PEM
-  return $self->setError (7251011, "OpenCA::REQ->setHeaderAttribute: The request is not in PEM-format.")
+  return $self->setError (7251011,
+             $self->{gettext} ("OpenCA::REQ->setHeaderAttribute: The request is not in PEM-format."))
 	if ($self->{reqFormat} !~ /^PEM|CRR|SPKAC$/i);
-  print "REQ->setHeaderAttribute: correct format - PEM<br>\n" if ($self->{DEBUG});
+  print $self->{gettext} ("REQ->setHeaderAttribute: correct format - PEM")."<br>\n" if ($self->{DEBUG});
 
   ## check for header
   if ($self->{item} !~ /$beginHeader/) {
@@ -824,7 +895,10 @@ sub setHeaderAttribute {
 
   for my $attribute (keys %{$keys}) {
 
-    print "REQ->setHeaderAttribute: $attribute:=".$keys->{$attribute}."<br>\n" if ($self->{DEBUG});
+    # print STDERR "REQ->setHeaderAttribute: $attribute:=".
+    # 					$keys->{$attribute}."<br>\n";
+
+	next if ( not $attribute );
 
     ## insert into item
     ## find last position in header
@@ -834,19 +908,93 @@ sub setHeaderAttribute {
       ## multirow
       $self->{item} =~ s/${endHeader}/${attribute}=\n${beginAttribute}\n$keys->{$attribute}\n${endAttribute}\n${endHeader}/;
     } else {
+	# print STDERR "REQ::setHeaderAttribute::Setting $attribute = " .
+	# 		$keys->{$attribute} . "\n" if ( $self->{DEBUG} );
+
+      	## Delete old attribute
+	if ( $self->getParsed()->{HEADER}->{$attribute} ) {
+      		$self->{item} =~ s/($attribute[^\n]+\n)//;
+	}
+
       ## single row
-      $self->{item} =~ s/${endHeader}/${attribute}=$keys->{$attribute}\n${endHeader}/;
+      $self->{item} =~ s/${endHeader}/${attribute} = $keys->{$attribute}\n${endHeader}/;
+      # print STDERR "REQ::NEW HEADER\n".$self->{item}."\n";
     }
 
   }
 
   ## if you call init then all information is lost !!!
-  return $self->setError (7251021, "OpenCA::REQ->setHeaderAttribute: Cannot re-initialize the request ".
-			"($errno)\n$errval")
+  return $self->setError (7251021,
+             $self->{gettext} ("OpenCA::REQ->setHeaderAttribute: Cannot re-initialize the request (__ERRNO__). __ERRVAL__",
+                               "__ERRNO__", $errno,
+                               "__ERRVAL__", $errval))
   	if (not $self->init ( REQ => $self->{item},
                     FORMAT      => $self->{reqFormat}));
 
   return 1;
+}
+
+sub getStatus {
+    my $self = shift;
+    return $self->{STATUS};
+}
+
+sub setStatus {
+	my $self = shift;
+	my $status = shift;
+
+	my $status_update = undef;
+	my $now = gmtime;
+
+	## Handles special fields like SUSPENDED_AFTER, REVOKED_AFTER, etc.
+	$status =~ s/\_.*//;
+	if (($self->{STATUS} ne $status) and ($status !~ /NEW|PENDING/)) {
+		$status_update = $status . "_AFTER";
+		if( $self->getParsed()->{HEADER}->{$status_update} eq "" ) {
+			$self->setHeaderAttribute ( $status_update => $now );
+		}
+		# $self->{$status_update} = $now;
+	}
+
+	if ( $self->{reqFormat} =~ /CRR/ ) {
+		$self->{DATATYPE} = $status . "_CRR";
+	} else {
+		$self->{DATATYPE} = $status . "_REQUEST";
+	}
+	$self->{STATUS} = $status;
+
+	return $self->getStatus();
+}
+
+sub get_emails {
+    my $self = shift;
+    my $parsed = $self->getParsed();
+    $parsed = shift if ($_[0]);
+
+    my @emails = ();
+
+    ## extract emails from subject alt name
+
+    if ( $parsed->{HEADER}->{SUBJECT_ALT_NAME} ) {
+        my @subjectAltNames = split (/,\s*/, $parsed->{HEADER}->{SUBJECT_ALT_NAME});
+        foreach my $h (@subjectAltNames) {
+            next if ($h !~ /^\s*email(|\.[0-9]+)[:=]/is);
+            $h =~ s/^\s*email(|\.[0-9]+)[:=]//i;
+            push (@emails, $h);
+        }
+    }
+
+    ## extract emails from subject
+
+    if (exists $parsed->{DN_HASH}->{EMAILADDRESS})
+    {
+        foreach my $mail (@{$parsed->{DN_HASH}->{EMAILADDRESS}})
+        {
+            push @emails, $mail;
+        }
+    }
+
+    return @emails;
 }
 
 # Autoload methods go after =cut, and are processed by the autosplit program.

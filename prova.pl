@@ -8,7 +8,7 @@ use OpenCA::REQ;
 use OpenCA::Tools;
 
 my $openssl = new OpenCA::OpenSSL( SHELL=>"/usr/bin/openssl" );
-my $tools = new OpenCA::Tools();
+my $tools = new OpenCA::Tools(GETTEXT => \&gettext);
 
 my @tmpfiles = ("priv.key","req.pem");
 
@@ -25,10 +25,11 @@ print "Generating a Request file ... \n";
 $openssl->genReq( OUTFILE=>"req.pem", KEYFILE=>"priv.key",
   	SUBJECT=>"Email=madwolf\@openca.org, CN=Massimiliano Pala, c=IT" );
 
-my $old = new OpenCA::REQ(SHELL=>$openssl,
-	  	KEYFILE=>"priv.key",
-		FORMAT=>"PEM",
-	  	SUBJECT=>"Email=you\@openca.org, CN=John Doe, OU=Department, O=OpenCA, C=IT" );
+my $old = new OpenCA::REQ (SHELL   => $openssl,
+                           GETTEXT => \&gettext,
+	  	           KEYFILE => "priv.key",
+		           FORMAT  => "PEM",
+	  	           SUBJECT => "Email=you\@openca.org, CN=John Doe, OU=Department, O=OpenCA, C=IT" );
 
 # print $old->getParsed()->{DN} . "\n";
 
@@ -36,12 +37,17 @@ my $old = new OpenCA::REQ(SHELL=>$openssl,
 ##  	DN=>["madwolf\@openca.org", "Massimiliano Pala", "CA", "", "" ] );
 
 # print "Parsing a REVOKE request file ... \n";
-# my $REQ = new OpenCA::REQ(SHELL=>$openssl, DATA=>$tools->getFile("revoke.req"));
+# my $REQ = new OpenCA::REQ (SHELL   => $openssl,
+#                             GETTEXT => \&gettext,
+#                             DATA    => $tools->getFile("revoke.req"));
 # print "CERT DN => " . $REQ->getParsed()->{REVOKE_CERTIFICATE_DN} . "\n";
 # print "\n\n";
 
 print "Parsing an SPKAC request file ... \n";
-my $REQ = new OpenCA::REQ(SHELL=>$openssl, INFILE=>"spkac.req", FORMAT=>SPKAC);
+my $REQ = new OpenCA::REQ (SHELL   => $openssl,
+                           GETTEXT => \&gettext,
+                           INFILE  => "spkac.req",
+                           FORMAT  => SPKAC);
 ## print "Parsing a RENEW request file ... \n";
 ## my $REQ = new OpenCA::REQ(SHELL=>$openssl, INFILE=>"renew.req", FORMAT=>RENEW);
 # my $REQ = new OpenCA::REQ(SHELL=>$openssl, INFILE=>"req.pem", FORMAT=>PEM);
@@ -64,6 +70,11 @@ print "KEY DIGEST => " . $REQ->getParsed()->{KEY_DIGEST} . "\n";
 
 foreach $tmp (@tmpfiles) {
 	unlink( "$tmp" );
+}
+
+sub gettext
+{
+    return $_[0];
 }
 
 exit 0; 
